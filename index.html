@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Slime Chunk Finder (1.8.8)</title>
+</head>
+<body style="font-family: sans-serif; padding: 20px;">
+  <h2>Slime Chunk Finder (Minecraft 1.8.8)</h2>
+  <p>Enter your world seed and chunk coordinates:</p>
+
+  <label>Seed: <input type="number" id="seed" value="12345"></label><br><br>
+  <label>Chunk X: <input type="number" id="chunkX" value="0"></label><br><br>
+  <label>Chunk Z: <input type="number" id="chunkZ" value="0"></label><br><br>
+
+  <button onclick="checkSlime()">Check Chunk</button>
+
+  <h3 id="result"></h3>
+
+<script>
+// Slime chunk algorithm for 1.8.8
+function checkSlime() {
+  var seed = BigInt(document.getElementById('seed').value);
+  var x = BigInt(document.getElementById('chunkX').value);
+  var z = BigInt(document.getElementById('chunkZ').value);
+
+  // Java's Random implementation (simplified for slime chunks)
+  var rnd = (seed +
+             (x * x * 0x4c1906n) +
+             (x * 0x5ac0dbn) +
+             (z * z * 0x4307a7n) +
+             (z * 0x5f24fen) ^ 0x3ad8025fn);
+
+  // Convert to 32-bit signed int
+  rnd = Number(rnd & 0xffffffffn);
+  if (rnd > 0x7fffffff) rnd -= 0x100000000;
+
+  // Slime chunk check
+  var isSlime = (rnd % 10) === 0;
+
+  document.getElementById('result').innerText =
+    isSlime ? "✅ This is a slime chunk!" : "❌ Not a slime chunk.";
+}
+</script>
+</body>
+</html>
