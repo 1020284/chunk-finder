@@ -2,43 +2,59 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Slime Chunk Finder (1.8.8)</title>
+  <title>Nearby Slime Chunk Finder (1.8.8)</title>
 </head>
 <body style="font-family: sans-serif; padding: 20px;">
-  <h2>Slime Chunk Finder (Minecraft 1.8.8)</h2>
-  <p>Enter your world seed and chunk coordinates:</p>
+  <h2>Nearby Slime Chunk Finder (Minecraft 1.8.8)</h2>
+  <p>Enter your world seed and your current block coordinates:</p>
 
   <label>Seed: <input type="number" id="seed" value="12345"></label><br><br>
-  <label>Chunk X: <input type="number" id="chunkX" value="0"></label><br><br>
-  <label>Chunk Z: <input type="number" id="chunkZ" value="0"></label><br><br>
+  <label>Your X (block): <input type="number" id="playerX" value="0"></label><br><br>
+  <label>Your Z (block): <input type="number" id="playerZ" value="0"></label><br><br>
+  <label>Search radius (chunks): <input type="number" id="radius" value="5"></label><br><br>
 
-  <button onclick="checkSlime()">Check Chunk</button>
+  <button onclick="findNearby()">Find Nearby Slime Chunks</button>
 
-  <h3 id="result"></h3>
+  <h3>Results:</h3>
+  <pre id="result"></pre>
 
 <script>
 // Slime chunk algorithm for 1.8.8
-function checkSlime() {
-  var seed = BigInt(document.getElementById('seed').value);
-  var x = BigInt(document.getElementById('chunkX').value);
-  var z = BigInt(document.getElementById('chunkZ').value);
+function isSlimeChunk(seed, x, z) {
+  let rnd = BigInt(seed) +
+            BigInt(x) * BigInt(x) * 0x4c1906n +
+            BigInt(x) * 0x5ac0dbn +
+            BigInt(z) * BigInt(z) * 0x4307a7n +
+            BigInt(z) * 0x5f24fen ^ 0x3ad8025fn;
 
-  // Java's Random implementation (simplified for slime chunks)
-  var rnd = (seed +
-             (x * x * 0x4c1906n) +
-             (x * 0x5ac0dbn) +
-             (z * z * 0x4307a7n) +
-             (z * 0x5f24fen) ^ 0x3ad8025fn);
-
-  // Convert to 32-bit signed int
   rnd = Number(rnd & 0xffffffffn);
   if (rnd > 0x7fffffff) rnd -= 0x100000000;
+  return (rnd % 10) === 0;
+}
 
-  // Slime chunk check
-  var isSlime = (rnd % 10) === 0;
+function findNearby() {
+  const seed = document.getElementById('seed').value;
+  const px = parseInt(document.getElementById('playerX').value);
+  const pz = parseInt(document.getElementById('playerZ').value);
+  const radius = parseInt(document.getElementById('radius').value);
 
-  document.getElementById('result').innerText =
-    isSlime ? "✅ This is a slime chunk!" : "❌ Not a slime chunk.";
+  // Convert player block coords to chunk coords
+  const chunkX = Math.floor(px / 16);
+  const chunkZ = Math.floor(pz / 16);
+
+  let output = "";
+
+  for (let x = chunkX - radius; x <= chunkX + radius; x++) {
+    for (let z = chunkZ - radius; z <= chunkZ + radius; z++) {
+      if (isSlimeChunk(seed, x, z)) {
+        let blockX = x * 16;
+        let blockZ = z * 16;
+        output += `Slime chunk at Chunk (${x}, ${z}) → Block coords ~(${blockX}, ${blockZ})\n`;
+      }
+    }
+  }
+
+  document.getElementById('result').innerText = output || "No slime chunks found nearby.";
 }
 </script>
 </body>
