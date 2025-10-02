@@ -31,13 +31,15 @@
   <canvas id="map" width="800" height="800"></canvas>
   <div id="tooltip"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/open-simplex-noise@2.5.0/lib/esm/index.js"></script>
+  <!-- OpenSimplex noise UMD build -->
+  <script src="https://cdn.jsdelivr.net/npm/open-simplex-noise/lib/umd/index.min.js"></script>
+
 <script>
 const canvas = document.getElementById('map');
 const ctx = canvas.getContext('2d');
 const tooltip = document.getElementById('tooltip');
 let zoom=1, offsetX=0, offsetZ=0, dragging=false, dragStartX=0, dragStartY=0;
-let noiseGen;
+let noise2D;
 
 // Minecraft‑like biome colors
 const COLORS = {
@@ -51,8 +53,8 @@ const COLORS = {
 };
 
 function biomeColor(x,z){
-  const h = noiseGen.noise2D(x/200,z/200); // height
-  const m = noiseGen.noise2D((x+1000)/200,(z-1000)/200); // moisture
+  const h = noise2D(x/200,z/200); // height
+  const m = noise2D((x+1000)/200,(z-1000)/200); // moisture
   if(h<-0.2) return COLORS.ocean;
   if(h<-0.1) return COLORS.beach;
   if(h>0.6) return COLORS.snow;
@@ -83,14 +85,13 @@ function isSlimeChunk(seed,x,z){
 
 function drawMap(){
   const seed=parseInt(document.getElementById('seed').value);
-  noiseGen = new openSimplexNoise.OpenSimplexNoise(seed);
+  noise2D = openSimplexNoise.makeNoise2D(seed);
   const px=parseInt(document.getElementById('playerX').value);
   const pz=parseInt(document.getElementById('playerZ').value);
   const range=parseInt(document.getElementById('range').value);
   const showTerrain=document.getElementById('showTerrain').checked;
   const heightShading=document.getElementById('heightShading').checked;
   const showSlime=document.getElementById('showSlime').checked;
-  const showStructures=document.getElementById('showStructures').checked;
   const showCaves=document.getElementById('showCaves').checked;
   const showGrid=document.getElementById('showGrid').checked;
 
@@ -104,12 +105,12 @@ function drawMap(){
       if(showTerrain){
         rgb=biomeColor(bx,bz);
         if(heightShading){
-          const elev=noiseGen.noise2D(bx/100,bz/100);
+          const elev=noise2D(bx/100,bz/100);
           rgb=shadeColor(rgb,elev,true);
         }
       }
-      if(showCaves && noiseGen.noise2D(bx/30,bz/30)>0.7) rgb=[100,100,100];
-      if(showSlime && isSlimeChunk(seed,bx,bz)) rgb=[0,255,0,180]; // bright green
+      if(showCaves && noise2D(bx/30,bz/30)>0.7) rgb=[100,100,100];
+      if(showSlime && isSlimeChunk(seed,bx,bz)) rgb=[0,255,0];
       img.data[i++]=rgb[0];
       img.data[i++]=rgb[1];
       img.data[i++]=rgb[2];
@@ -122,6 +123,18 @@ function drawMap(){
   tmp.getContext('2d').putImageData(img,0,0);
   const drawSize=canvas.width*zoom;
   ctx.drawImage(tmp,0,0,size,size,(canvas.width-drawSize)/2,(canvas.height-drawSize)/2,drawSize,drawSize);
+
+  // Grid overlay
+  if(showGrid){
+    ctx.strokeStyle="rgba(0,0,0,0.2)";
+    const step=16*zoom;
+    for(let gx=(canvas.width-drawSize)/2; gx<canvas.width-(canvas.width-drawSize)/2; gx+=step){
+      ctx.beginPath(); ctx.moveTo(gx,(canvas.height-drawSize)/2); ctx.lineTo(gx,canvas.height-(canvas.height-drawSize)/2); ctx.stroke();
+    }
+    for(let gz=(canvas.height-drawSize)/2; gz<canvas.height-(canvas.height-drawSize)/2; gz+=step){
+      ctx.beginPath(); ctx.moveTo((canvas.width-drawSize)/2,gz); ctx.lineTo(canvas.width-(canvas.width-drawSize)/2,gz); ctx.stroke();
+    }
+  }
 
   // Player marker
   ctx.fillStyle="#ff0000";
