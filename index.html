@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Minecraft World Analyzer – Full Features</title>
+  <title>Minecraft‑Style Map Viewer</title>
   <style>
     body { font-family: sans-serif; background:#f0f0f0; padding:20px; }
     canvas { border:1px solid #333; cursor:grab; display:block; margin-top:10px; }
@@ -12,7 +12,7 @@
   </style>
 </head>
 <body>
-  <h2>🗺️ Minecraft World Analyzer (Block‑Level, Full Features)</h2>
+  <h2>🗺️ Minecraft‑Style Map Viewer</h2>
   <div id="controls">
     <label>Seed: <input type="number" id="seed" value="12345"></label>
     <label>Your X (block): <input type="number" id="playerX" value="0"></label>
@@ -28,52 +28,46 @@
     <button onclick="exportMap()">Export PNG</button>
   </div>
 
-  <!-- Map + Legend side by side -->
-  <div style="display:flex; gap:20px; align-items:flex-start;">
-    <canvas id="map" width="800" height="800"></canvas>
-    <div id="legend" style="background:#fff; border:1px solid #ccc; border-radius:6px; padding:10px; max-width:300px;">
-      <h3 style="margin:0 0 8px 0;">Legend</h3>
-      <div><span style="display:inline-block;width:16px;height:16px;background:#6fbde6;border:1px solid #000;margin-right:6px;"></span>Ocean</div>
-      <div><span style="display:inline-block;width:16px;height:16px;background:#f1c36d;border:1px solid #000;margin-right:6px;"></span>Desert</div>
-      <div><span style="display:inline-block;width:16px;height:16px;background:#98c77c;border:1px solid #000;margin-right:6px;"></span>Plains</div>
-      <div><span style="display:inline-block;width:16px;height:16px;background:#2c7a2c;border:1px solid #000;margin-right:6px;"></span>Forest</div>
-      <div><span style="display:inline-block;width:16px;height:16px;background:#00ff00;border:1px solid #000;margin-right:6px;"></span>Slime Chunk</div>
-      <div><span style="display:inline-block;width:16px;height:16px;background:#888;border:1px solid #000;margin-right:6px;"></span>Cave Area</div>
-      <div>🏠 Village</div>
-      <div>⛩️ Temple</div>
-      <div>⚔️ Stronghold</div>
-      <div style="color:#ff0000;">● Player</div>
-    </div>
-  </div>
-
-  <!-- Tooltip element -->
+  <canvas id="map" width="800" height="800"></canvas>
   <div id="tooltip"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/open-simplex-noise@2.5.0/lib/esm/index.js"></script>
 <script>
 const canvas = document.getElementById('map');
 const ctx = canvas.getContext('2d');
 const tooltip = document.getElementById('tooltip');
-let zoom = 1, offsetX=0, offsetZ=0;
-let dragging=false, dragStartX=0, dragStartY=0;
+let zoom=1, offsetX=0, offsetZ=0, dragging=false, dragStartX=0, dragStartY=0;
+let noiseGen;
 
-// Noise
-function noise(x,z,seed){ return Math.sin((x*374761393+z*668265263+seed*982451653)%2147483647)*0.5+0.5; }
+// Minecraft‑like biome colors
+const COLORS = {
+  ocean: [64,64,255],
+  beach: [250,240,190],
+  plains: [141,179,96],
+  forest: [34,85,28],
+  desert: [210,180,64],
+  mountain: [128,128,128],
+  snow: [240,240,240]
+};
 
-// Biomes
-function biomeColor(x,z,seed){
-  const t=noise(x*0.02,z*0.02,seed), m=noise(x*0.02+100,z*0.02-100,seed);
-  if(t<0.3) return [111,189,230]; // ocean
-  if(t>0.7 && m<0.4) return [241,195,109]; // desert
-  if(m>0.6) return [44,122,44]; // forest
-  return [152,199,124]; // plains
+function biomeColor(x,z){
+  const h = noiseGen.noise2D(x/200,z/200); // height
+  const m = noiseGen.noise2D((x+1000)/200,(z-1000)/200); // moisture
+  if(h<-0.2) return COLORS.ocean;
+  if(h<-0.1) return COLORS.beach;
+  if(h>0.6) return COLORS.snow;
+  if(h>0.4) return COLORS.mountain;
+  if(m>0.2) return COLORS.forest;
+  if(m<-0.2) return COLORS.desert;
+  return COLORS.plains;
 }
+
 function shadeColor(rgb,elev,enabled){
   if(!enabled) return rgb;
-  const factor=(elev-0.5)*0.8;
-  return rgb.map(c=>Math.min(255,Math.max(0,c+factor*128)));
+  const factor=(elev+1)/2*0.3; // subtle shading
+  return rgb.map(c=>Math.min(255,Math.max(0,c+factor*50)));
 }
 
-// Features
 function isSlimeChunk(seed,x,z){
   const cx=Math.floor(x/16), cz=Math.floor(z/16);
   let rnd = BigInt(seed) +
@@ -86,13 +80,10 @@ function isSlimeChunk(seed,x,z){
   if (n > 0x7fffffff) n -= 0x100000000;
   return (n % 10) === 0;
 }
-function isVillage(x,z){ return (x%512===0 && z%512===0); }
-function isTemple(x,z){ return (x%480===0 && z%480===0); }
-function isStronghold(x,z){ let d=Math.sqrt(x*x+z*z); return Math.abs(d-2048)<16; }
-function caveDensity(x,z,seed){ return noise(x*0.1,z*0.1,seed)>0.8; }
 
 function drawMap(){
   const seed=parseInt(document.getElementById('seed').value);
+  noiseGen = new openSimplexNoise.OpenSimplexNoise(seed);
   const px=parseInt(document.getElementById('playerX').value);
   const pz=parseInt(document.getElementById('playerZ').value);
   const range=parseInt(document.getElementById('range').value);
@@ -111,14 +102,14 @@ function drawMap(){
       const bx=px-range+x+offsetX, bz=pz-range+z+offsetZ;
       let rgb=[200,200,200];
       if(showTerrain){
-        rgb=biomeColor(bx,bz,seed);
+        rgb=biomeColor(bx,bz);
         if(heightShading){
-          const elev=noise(bx*0.05,bz*0.05,seed);
+          const elev=noiseGen.noise2D(bx/100,bz/100);
           rgb=shadeColor(rgb,elev,true);
         }
       }
-      if(showCaves && caveDensity(bx,bz,seed)) rgb=[100,100,100];
-      if(showSlime && isSlimeChunk(seed,bx,bz)) rgb=[0,255,0];
+      if(showCaves && noiseGen.noise2D(bx/30,bz/30)>0.7) rgb=[100,100,100];
+      if(showSlime && isSlimeChunk(seed,bx,bz)) rgb=[0,255,0,180]; // bright green
       img.data[i++]=rgb[0];
       img.data[i++]=rgb[1];
       img.data[i++]=rgb[2];
@@ -132,139 +123,41 @@ function drawMap(){
   const drawSize=canvas.width*zoom;
   ctx.drawImage(tmp,0,0,size,size,(canvas.width-drawSize)/2,(canvas.height-drawSize)/2,drawSize,drawSize);
 
-  // Structures overlay
-  if (showStructures) {
-    const drawSize = canvas.width * zoom;
-    const startX = (canvas.width - drawSize) / 2;
-    const startZ = (canvas.height - drawSize) / 2;
-
-    // Visible world bounds (in blocks)
-    const worldMinX = px - range + offsetX;
-    const worldMinZ = pz - range + offsetZ;
-    const worldMaxX = px + range + offsetX;
-    const worldMaxZ = pz + range + offsetZ;
-
-    // Chunk-aligned sampling to check for structures
-    ctx.textBaseline = "top";
-    ctx.font = `${Math.max(12, 10 * zoom)}px sans-serif`;
-    ctx.fillStyle = "#000";
-
-    for (let bz = worldMinZ; bz <= worldMaxZ; bz += 16) {
-      for (let bx = worldMinX; bx <= worldMaxX; bx += 16) {
-        // Convert world block to screen position inside the zoomed/centered image
-        const localX = bx - worldMinX; // 0..size-1
-        const localZ = bz - worldMinZ; // 0..size-1
-        const sx = startX + localX * zoom;
-        const sz = startZ + localZ * zoom;
-
-        // Skip if outside the drawn image
-        if (sx < startX || sz < startZ || sx > startX + drawSize || sz > startZ + drawSize) continue;
-
-        // Draw icons
-        if (isVillage(bx, bz)) ctx.fillText("🏠", sx, sz);
-        if (isTemple(bx, bz))  ctx.fillText("⛩️", sx, sz);
-        if (isStronghold(bx, bz)) ctx.fillText("⚔️", sx, sz);
-      }
-    }
-  }
-  // --- Grid overlay ---
-  if (showGrid) {
-    ctx.strokeStyle = "rgba(0,0,0,0.2)";
-    const step = 16 * zoom;
-    for (let gx = (canvas.width - drawSize) / 2; gx < canvas.width - (canvas.width - drawSize) / 2; gx += step) {
-      ctx.beginPath();
-      ctx.moveTo(gx, (canvas.height - drawSize) / 2);
-      ctx.lineTo(gx, canvas.height - (canvas.height - drawSize) / 2);
-      ctx.stroke();
-    }
-    for (let gz = (canvas.height - drawSize) / 2; gz < canvas.height - (canvas.height - drawSize) / 2; gz += step) {
-      ctx.beginPath();
-      ctx.moveTo((canvas.width - drawSize) / 2, gz);
-      ctx.lineTo(canvas.width - (canvas.width - drawSize) / 2, gz);
-      ctx.stroke();
-    }
-  }
-
-  // --- Player marker ---
-  ctx.fillStyle = "#ff0000";
+  // Player marker
+  ctx.fillStyle="#ff0000";
   ctx.beginPath();
-  ctx.arc(canvas.width / 2, canvas.height / 2, 5, 0, Math.PI * 2);
+  ctx.arc(canvas.width/2,canvas.height/2,5,0,Math.PI*2);
   ctx.fill();
 }
 
-// --- Zoom handling ---
-canvas.addEventListener("wheel", e => {
+// Zoom
+canvas.addEventListener("wheel", e=>{
   e.preventDefault();
-  const prevZoom = zoom;
-  zoom *= e.deltaY < 0 ? 1.1 : 0.9;
-  zoom = Math.max(0.25, Math.min(8, zoom));
-  if (Math.abs(prevZoom - zoom) > 0.001) drawMap();
-}, { passive: false });
+  zoom*=e.deltaY<0?1.1:0.9;
+  zoom=Math.max(0.25,Math.min(8,zoom));
+  drawMap();
+},{passive:false});
 
-// --- Panning (drag to move) ---
-canvas.addEventListener("mousedown", e => {
-  dragging = true;
-  dragStartX = e.clientX;
-  dragStartY = e.clientY;
-  canvas.style.cursor = "grabbing";
-});
-canvas.addEventListener("mouseup", () => { dragging = false; canvas.style.cursor = "grab"; });
-canvas.addEventListener("mouseleave", () => { dragging = false; canvas.style.cursor = "grab"; });
-canvas.addEventListener("mousemove", e => {
-  if (dragging) {
-    const dx = e.clientX - dragStartX;
-    const dz = e.clientY - dragStartY;
-    dragStartX = e.clientX;
-    dragStartY = e.clientY;
-    offsetX -= Math.round(dx / zoom);
-    offsetZ -= Math.round(dz / zoom);
+// Panning
+canvas.addEventListener("mousedown", e=>{dragging=true;dragStartX=e.clientX;dragStartY=e.clientY;});
+canvas.addEventListener("mouseup", ()=>dragging=false);
+canvas.addEventListener("mousemove", e=>{
+  if(dragging){
+    offsetX -= Math.round((e.clientX-dragStartX)/zoom);
+    offsetZ -= Math.round((e.clientY-dragStartY)/zoom);
+    dragStartX=e.clientX; dragStartY=e.clientY;
     drawMap();
   }
 });
 
-// --- Tooltips on hover ---
-canvas.addEventListener("mousemove", e => {
-  if (dragging) { tooltip.style.display = "none"; return; }
-  const seed = parseInt(document.getElementById('seed').value);
-  const px = parseInt(document.getElementById('playerX').value);
-  const pz = parseInt(document.getElementById('playerZ').value);
-  const range = parseInt(document.getElementById('range').value);
-  const size = range * 2;
-  const drawSize = canvas.width * zoom;
-  const startX = (canvas.width - drawSize) / 2;
-  const startZ = (canvas.height - drawSize) / 2;
-  const relX = (e.offsetX - startX) / zoom;
-  const relZ = (e.offsetY - startZ) / zoom;
-  if (relX < 0 || relZ < 0 || relX >= size || relZ >= size) {
-    tooltip.style.display = "none"; return;
-  }
-  const bx = px - range + Math.floor(relX) + offsetX;
-  const bz = pz - range + Math.floor(relZ) + offsetZ;
-  let info = `Block (${bx}, ${bz})`;
-  if (isSlimeChunk(seed, bx, bz)) info += " • Slime";
-  if (isVillage(bx, bz)) info += " • Village";
-  if (isTemple(bx, bz)) info += " • Temple";
-  if (isStronghold(bx, bz)) info += " • Stronghold";
-  if (caveDensity(bx, bz, seed)) info += " • Cave";
-  tooltip.textContent = info;
-  tooltip.style.left = (e.pageX + 12) + "px";
-  tooltip.style.top = (e.pageY + 12) + "px";
-  tooltip.style.display = "block";
-});
-canvas.addEventListener("mouseout", () => tooltip.style.display = "none");
-
-// --- Export PNG ---
-function exportMap() {
-  const link = document.createElement('a');
-  link.download = 'minecraft_map.png';
-  link.href = canvas.toDataURL('image/png');
+function exportMap(){
+  const link=document.createElement('a');
+  link.download='map.png';
+  link.href=canvas.toDataURL();
   link.click();
 }
 
-// --- Init ---
-window.onload = () => {
-  drawMap();
-};
+window.onload=drawMap;
 </script>
 </body>
 </html>
