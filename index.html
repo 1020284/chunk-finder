@@ -12,13 +12,20 @@
     canvas {
       border: 1px solid #333;
       cursor: grab;
-    }
-    label {
       display: block;
       margin-top: 10px;
     }
+    label {
+      display: block;
+      margin-top: 8px;
+    }
     #controls {
       margin-bottom: 10px;
+      background: #fff;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      max-width: 320px;
     }
     #tooltip {
       position: absolute;
@@ -42,6 +49,7 @@
     <label><input type="checkbox" id="showStructures" checked> Show Structures</label>
     <label><input type="checkbox" id="showTerrain" checked> Show Terrain</label>
     <label><input type="checkbox" id="showCaves"> Show Cave Preview</label>
+    <label><input type="checkbox" id="showGrid" checked> Show Grid</label>
     <button onclick="drawMap()">Generate Map</button>
     <button onclick="exportMap()">Export as PNG</button>
   </div>
@@ -51,180 +59,242 @@
 
   <script>
     let offsetX = 0, offsetZ = 0, zoom = 1;
-let dragging = false, dragStartX, dragStartY;
-const canvas = document.getElementById('map');
-const ctx = canvas.getContext('2d');
-const tooltip = document.getElementById('tooltip');
+    let dragging = false, dragStartX, dragStartY;
+    const canvas = document.getElementById('map');
+    const ctx = canvas.getContext('2d');
+    const tooltip = document.getElementById('tooltip');
 
-function isSlimeChunk(seed, x, z) {
-  let rnd = BigInt(seed) +
-            BigInt(x) * BigInt(x) * 0x4c1906n +
-            BigInt(x) * 0x5ac0dbn +
-            BigInt(z) * BigInt(z) * 0x4307a7n +
-            BigInt(z) * 0x5f24fen ^ 0x3ad8025fn;
-  rnd = Number(rnd & 0xffffffffn);
-  if (rnd > 0x7fffffff) rnd -= 0x100000000;
-  return (rnd % 10) === 0;
-}
-
-function pseudoBiomeColor(x, z, seed) {
-  const val = Math.abs((x * 49632 + z * 325176 + parseInt(seed)) % 100);
-  if (val < 20) return "#87ceeb"; // ocean
-  if (val < 40) return "#f4a460"; // desert
-  if (val < 60) return "#98fb98"; // plains
-  if (val < 80) return "#228b22"; // forest
-  return "#d2b48c"; // hills
-}
-
-function caveDensity(x, z, seed) {
-  const val = Math.abs(Math.sin((x + seed) * 0.1) + Math.cos((z - seed) * 0.1));
-  return val > 1.5;
-}
-
-function isVillageChunk(x, z) {
-  return (x % 32 === 0 && z % 32 === 0);
-}
-
-function isTempleChunk(x, z) {
-  return (x % 30 === 0 && z % 30 === 0);
-}
-
-function isStrongholdChunk(x, z, seed) {
-  const ringRadius = 128;
-  const dx = x * 16;
-  const dz = z * 16;
-  const dist = Math.sqrt(dx * dx + dz * dz);
-  return Math.abs(dist - ringRadius) < 16;
-}
-
-function drawMap() {
-  const seed = document.getElementById('seed').value;
-  const px = parseInt(document.getElementById('playerX').value);
-  const pz = parseInt(document.getElementById('playerZ').value);
-  const range = parseInt(document.getElementById('range').value);
-  const showSlime = document.getElementById('showSlime').checked;
-  const showStructures = document.getElementById('showStructures').checked;
-  const showTerrain = document.getElementById('showTerrain').checked;
-  const showCaves = document.getElementById('showCaves').checked;
-
-  const chunkX = Math.floor(px / 16);
-  const chunkZ = Math.floor(pz / 16);
-
-  offsetX = chunkX - range;
-  offsetZ = chunkZ - range;
-
-  const scale = (canvas.width / (range * 2 + 1)) * zoom;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  for (let x = 0; x <= range * 2; x++) {
-    for (let z = 0; z <= range * 2; z++) {
-      const cx = offsetX + x;
-      const cz = offsetZ + z;
-      const screenX = x * scale;
-      const screenZ = z * scale;
-
-      if (showTerrain) {
-        ctx.fillStyle = pseudoBiomeColor(cx, cz, seed);
-        ctx.fillRect(screenX, screenZ, scale, scale);
+    // --- Simplex-like noise (seeded) ---
+    class SimplexNoise {
+      constructor(seed) { this.seed = seed; }
+      noise2D(x, y) {
+        return Math.sin((x * 374761393 + y * 668265263 + this.seed * 982451653) % 2147483647) * 0.5 + 0.5;
       }
-
-      if (showCaves && caveDensity(cx, cz, seed)) {
-        ctx.fillStyle = "rgba(128,128,128,0.3)";
-        ctx.fillRect(screenX, screenZ, scale, scale);
-      }
-
-      if (showSlime && isSlimeChunk(seed, cx, cz)) {
-        ctx.fillStyle = "rgba(0,255,0,0.5)";
-        ctx.fillRect(screenX, screenZ, scale, scale);
-      }
-
-      if (showStructures) {
-        if (isVillageChunk(cx, cz)) {
-          ctx.fillStyle = "#ff9900";
-          ctx.fillRect(screenX + scale/4, screenZ + scale/4, scale/2, scale/2);
-        }
-        if (isTempleChunk(cx, cz)) {
-          ctx.fillStyle = "#800080";
-          ctx.beginPath();
-          ctx.arc(screenX + scale/2, screenZ + scale/2, scale/4, 0, 2 * Math.PI);
-          ctx.fill();
-        }
-        if (isStrongholdChunk(cx, cz, seed)) {
-          ctx.fillStyle = "#666";
-          ctx.beginPath();
-          ctx.moveTo(screenX + scale/2, screenZ + scale/4);
-          ctx.lineTo(screenX + scale*3/4, screenZ + scale/2);
-          ctx.lineTo(screenX + scale/2, screenZ + scale*3/4);
-          ctx.lineTo(screenX + scale/4, screenZ + scale/2);
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
-
-      ctx.strokeStyle = "#999";
-      ctx.strokeRect(screenX, screenZ, scale, scale);
     }
-  }
+    let simplex;
 
-  ctx.fillStyle = "#ff0000";
-  ctx.beginPath();
-  ctx.arc(canvas.width / 2, canvas.height / 2, scale / 3, 0, 2 * Math.PI);
-  ctx.fill();
-}
+    // --- Slime Chunk Algorithm (MC 1.8.8) ---
+    function isSlimeChunk(seed, x, z) {
+      let rnd = BigInt(seed) +
+                BigInt(x) * BigInt(x) * 0x4c1906n +
+                BigInt(x) * 0x5ac0dbn +
+                BigInt(z) * BigInt(z) * 0x4307a7n +
+                BigInt(z) * 0x5f24fen ^ 0x3ad8025fn;
+      rnd = Number(rnd & 0xffffffffn);
+      if (rnd > 0x7fffffff) rnd -= 0x100000000;
+      return (rnd % 10) === 0;
+    }
 
-canvas.addEventListener("wheel", e => {
-  zoom *= e.deltaY < 0 ? 1.1 : 0.9;
-  drawMap();
-});
+    // --- Biome + Heightmap ---
+    function biomeColor(x, z, seed) {
+      const n = simplex.noise2D(x * 0.05 + seed, z * 0.05 - seed);
+      const h = simplex.noise2D(x * 0.1, z * 0.1); // heightmap
+      let base;
+      if (n < 0.2) base = "#87ceeb"; // ocean
+      else if (n < 0.4) base = "#f4a460"; // desert
+      else if (n < 0.6) base = "#98fb98"; // plains
+      else if (n < 0.8) base = "#228b22"; // forest
+      else base = "#d2b48c"; // hills
+      return shadeColor(base, (h - 0.5) * 40);
+    }
 
-canvas.addEventListener("mousedown", e => {
-  dragging = true;
-  dragStartX = e.offsetX;
-  dragStartY = e.offsetY;
-});
+    function shadeColor(color, percent) {
+      let f = parseInt(color.slice(1),16),
+          t = percent<0?0:255,
+          p = percent<0?percent*-1:percent,
+          R = f>>16,
+          G = f>>8&0x00FF,
+          B = f&0x0000FF;
+      return "#" + (0x1000000 +
+        (Math.round((t-R)*p)+R)*0x10000 +
+        (Math.round((t-G)*p)+G)*0x100 +
+        (Math.round((t-B)*p)+B)).toString(16).slice(1);
+    }
 
-canvas.addEventListener("mouseup", () => dragging = false);
-canvas.addEventListener("mouseleave", () => dragging = false);
+    // --- Cave Preview ---
+    function caveDensity(x, z, seed) {
+      const val = Math.abs(Math.sin((x + seed) * 0.1) + Math.cos((z - seed) * 0.1));
+      return val > 1.5;
+    }
 
-canvas.addEventListener("mousemove", e => {
-  if (dragging) {
-    offsetX -= Math.round((e.offsetX - dragStartX) / (canvas.width / 40));
-    offsetZ -= Math.round((e.offsetY - dragStartY) / (canvas.height / 40));
-    dragStartX = e.offsetX;
-    dragStartY = e.offsetY;
-    drawMap();
-  } else {
-    const range = parseInt(document.getElementById('range').value);
-    const scale = canvas.width / (range * 2 + 1);
-    const x = Math.floor(e.offsetX / scale);
-    const z = Math.floor(e.offsetY / scale);
-    const cx = offsetX + x;
-    const cz = offsetZ + z;
-    const seed = document.getElementById('seed').value;
+    // --- Structures ---
+    function isVillageChunk(x, z) { return (x % 32 === 0 && z % 32 === 0); }
+    function isTempleChunk(x, z) { return (x % 30 === 0 && z % 30 === 0); }
+    function isStrongholdChunk(x, z, seed) {
+      const ringRadius = 128;
+      const dx = x * 16, dz = z * 16;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      return Math.abs(dist - ringRadius) < 16;
+    }
 
-    let info = `Chunk (${cx}, ${cz})`;
-    if (document.getElementById('showSlime').checked && isSlimeChunk(seed, cx, cz)) info += " | Slime Chunk";
-    if (document.getElementById('showStructures').checked && isVillageChunk(cx, cz)) info += " | Village";
-    if (document.getElementById('showStructures').checked && isTempleChunk(cx, cz)) info += " | Temple";
-    if (document.getElementById('showStructures').checked && isStrongholdChunk(cx, cz, seed)) info += " | Stronghold";
-    if (document.getElementById('showCaves').checked && caveDensity(cx, cz, seed)) info += " | Cave Area";
+    // --- Main Draw Function ---
+    function drawMap() {
+      const seed = parseInt(document.getElementById('seed').value);
+      const px = parseInt(document.getElementById('playerX').value);
+      const pz = parseInt(document.getElementById('playerZ').value);
+      const range = parseInt(document.getElementById('range').value);
+      const showSlime = document.getElementById('showSlime').checked;
+      const showStructures = document.getElementById('showStructures').checked;
+      const showTerrain = document.getElementById('showTerrain').checked;
+      const showCaves = document.getElementById('showCaves').checked;
+      const showGrid = document.getElementById('showGrid').checked;
 
-    tooltip.style.left = e.pageX + 10 + "px";
-    tooltip.style.top = e.pageY + 10 + "px";
-    tooltip.innerText = info;
-    tooltip.style.display = "block";
-  }
-});
+      simplex = new SimplexNoise(seed);
 
-canvas.addEventListener("mouseout", () => tooltip.style.display = "none");
+      const chunkX = Math.floor(px / 16);
+      const chunkZ = Math.floor(pz / 16);
+      offsetX = chunkX - range;
+      offsetZ = chunkZ - range;
 
-function exportMap() {
-  const link = document.createElement('a');
-  link.download = 'minecraft_map.png';
-  link.href = canvas.toDataURL();
-  link.click();
-}
+      const scale = (canvas.width / (range * 2 + 1)) * zoom;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+      for (let x = 0; x <= range * 2; x++) {
+        for (let z = 0; z <= range * 2; z++) {
+          const cx = offsetX + x;
+          const cz = offsetZ + z;
+          const screenX = x * scale;
+          const screenZ = z * scale;
+
+          if (showTerrain) {
+            ctx.fillStyle = biomeColor(cx, cz, seed);
+            ctx.fillRect(screenX, screenZ, scale, scale);
+          }
+          if (showCaves && caveDensity(cx, cz, seed)) {
+            ctx.fillStyle = "rgba(128,128,128,0.3)";
+            ctx.fillRect(screenX, screenZ, scale, scale);
+          }
+          if (showSlime && isSlimeChunk(seed, cx, cz)) {
+            ctx.fillStyle = "rgba(0,255,0,0.5)";
+            ctx.fillRect(screenX, screenZ, scale, scale);
+          }
+          if (showStructures) {
+            ctx.font = `${scale/1.5}px sans-serif`;
+            if (isVillageChunk(cx, cz)) ctx.fillText("🏠", screenX + scale/4, screenZ + scale*0.75);
+            if (isTempleChunk(cx, cz)) ctx.fillText("⛩️", screenX + scale/4, screenZ + scale*0.75);
+            if (isStrongholdChunk(cx, cz, seed)) ctx.fillText("⚔️", screenX + scale/4, screenZ + scale*0.75);
+          }
+          if (showGrid) {
+            ctx.strokeStyle
+                      }
+        }
+      }
+
+      // Player marker
+      ctx.fillStyle = "#ff0000";
+      ctx.beginPath();
+      ctx.arc(canvas.width / 2, canvas.height / 2, scale / 3, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Legend
+      drawLegend();
+
+      // Save settings
+      localStorage.setItem("mcMapSettings", JSON.stringify({
+        seed, px, pz, range,
+        showSlime, showStructures, showTerrain, showCaves, showGrid
+      }));
+    }
+
+    // --- Legend ---
+    function drawLegend() {
+      const items = [
+        { color: "#87ceeb", label: "Ocean" },
+        { color: "#f4a460", label: "Desert" },
+        { color: "#98fb98", label: "Plains" },
+        { color: "#228b22", label: "Forest" },
+        { color: "#d2b48c", label: "Hills" },
+        { color: "rgba(128,128,128,0.3)", label: "Cave Preview" },
+        { color: "rgba(0,255,0,0.5)", label: "Slime Chunk" },
+        { color: "#ff9900", label: "Village (🏠)" },
+        { color: "#800080", label: "Temple (⛩️)" },
+        { color: "#666", label: "Stronghold (⚔️)" },
+        { color: "#ff0000", label: "You" }
+      ];
+
+      ctx.font = "14px sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(10, 10, 170, items.length * 20 + 10);
+      ctx.strokeStyle = "#333";
+      ctx.strokeRect(10, 10, 170, items.length * 20 + 10);
+
+      items.forEach((item, i) => {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(15, 15 + i * 20, 15, 15);
+        ctx.fillStyle = "#000";
+        ctx.fillText(item.label, 35, 27 + i * 20);
+      });
+    }
+
+    // --- Interactivity ---
+    canvas.addEventListener("wheel", e => {
+      zoom *= e.deltaY < 0 ? 1.1 : 0.9;
+      drawMap();
+    });
+
+    canvas.addEventListener("mousedown", e => {
+      dragging = true;
+      dragStartX = e.offsetX;
+      dragStartY = e.offsetY;
+    });
+    canvas.addEventListener("mouseup", () => dragging = false);
+    canvas.addEventListener("mouseleave", () => dragging = false);
+
+    canvas.addEventListener("mousemove", e => {
+      if (dragging) {
+        offsetX -= Math.round((e.offsetX - dragStartX) / (canvas.width / 40));
+        offsetZ -= Math.round((e.offsetY - dragStartY) / (canvas.height / 40));
+        dragStartX = e.offsetX;
+        dragStartY = e.offsetY;
+        drawMap();
+      } else {
+        const range = parseInt(document.getElementById('range').value);
+        const scale = canvas.width / (range * 2 + 1);
+        const x = Math.floor(e.offsetX / scale);
+        const z = Math.floor(e.offsetY / scale);
+        const cx = offsetX + x;
+        const cz = offsetZ + z;
+        const seed = parseInt(document.getElementById('seed').value);
+
+        let info = `Chunk (${cx}, ${cz})`;
+        if (document.getElementById('showSlime').checked && isSlimeChunk(seed, cx, cz)) info += " | Slime Chunk";
+        if (document.getElementById('showStructures').checked && isVillageChunk(cx, cz)) info += " | Village";
+        if (document.getElementById('showStructures').checked && isTempleChunk(cx, cz)) info += " | Temple";
+        if (document.getElementById('showStructures').checked && isStrongholdChunk(cx, cz, seed)) info += " | Stronghold";
+        if (document.getElementById('showCaves').checked && caveDensity(cx, cz, seed)) info += " | Cave Area";
+
+        tooltip.style.left = e.pageX + 10 + "px";
+        tooltip.style.top = e.pageY + 10 + "px";
+        tooltip.innerText = info;
+        tooltip.style.display = "block";
+      }
+    });
+    canvas.addEventListener("mouseout", () => tooltip.style.display = "none");
+
+    // --- Export ---
+    function exportMap() {
+      const link = document.createElement('a');
+      link.download = 'minecraft_map.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    }
+
+    // --- Load saved settings on startup ---
+    window.onload = () => {
+      const saved = JSON.parse(localStorage.getItem("mcMapSettings"));
+      if (saved) {
+        document.getElementById('seed').value = saved.seed;
+        document.getElementById('playerX').value = saved.px;
+        document.getElementById('playerZ').value = saved.pz;
+        document.getElementById('range').value = saved.range;
+        document.getElementById('showSlime').checked = saved.showSlime;
+        document.getElementById('showStructures').checked = saved.showStructures;
+        document.getElementById('showTerrain').checked = saved.showTerrain;
+        document.getElementById('showCaves').checked = saved.showCaves;
+        document.getElementById('showGrid').checked = saved.showGrid;
+      }
+      drawMap();
+    };
   </script>
 </body>
 </html>
