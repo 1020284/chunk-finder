@@ -28,24 +28,26 @@
     <button onclick="exportMap()">Export PNG</button>
   </div>
 
-  <canvas id="map" width="800" height="800"></canvas>
-  <!-- Main map canvas -->
-<canvas id="map" width="800" height="800"></canvas>
+  <!-- Map + Legend side by side -->
+  <div style="display:flex; gap:20px; align-items:flex-start;">
+    <canvas id="map" width="800" height="800"></canvas>
+    <div id="legend" style="background:#fff; border:1px solid #ccc; border-radius:6px; padding:10px; max-width:300px;">
+      <h3 style="margin:0 0 8px 0;">Legend</h3>
+      <div><span style="display:inline-block;width:16px;height:16px;background:#6fbde6;border:1px solid #000;margin-right:6px;"></span>Ocean</div>
+      <div><span style="display:inline-block;width:16px;height:16px;background:#f1c36d;border:1px solid #000;margin-right:6px;"></span>Desert</div>
+      <div><span style="display:inline-block;width:16px;height:16px;background:#98c77c;border:1px solid #000;margin-right:6px;"></span>Plains</div>
+      <div><span style="display:inline-block;width:16px;height:16px;background:#2c7a2c;border:1px solid #000;margin-right:6px;"></span>Forest</div>
+      <div><span style="display:inline-block;width:16px;height:16px;background:#00ff00;border:1px solid #000;margin-right:6px;"></span>Slime Chunk</div>
+      <div><span style="display:inline-block;width:16px;height:16px;background:#888;border:1px solid #000;margin-right:6px;"></span>Cave Area</div>
+      <div>🏠 Village</div>
+      <div>⛩️ Temple</div>
+      <div>⚔️ Stronghold</div>
+      <div style="color:#ff0000;">● Player</div>
+    </div>
+  </div>
 
-<!-- Legend panel goes immediately after -->
-<div id="legend" style="margin-top:12px; background:#fff; border:1px solid #ccc; border-radius:6px; padding:10px; max-width:300px;">
-  <h3 style="margin:0 0 8px 0;">Legend</h3>
-  <div><span style="display:inline-block;width:16px;height:16px;background:#6fbde6;border:1px solid #000;margin-right:6px;"></span>Ocean</div>
-  <div><span style="display:inline-block;width:16px;height:16px;background:#f1c36d;border:1px solid #000;margin-right:6px;"></span>Desert</div>
-  <div><span style="display:inline-block;width:16px;height:16px;background:#98c77c;border:1px solid #000;margin-right:6px;"></span>Plains</div>
-  <div><span style="display:inline-block;width:16px;height:16px;background:#2c7a2c;border:1px solid #000;margin-right:6px;"></span>Forest</div>
-  <div><span style="display:inline-block;width:16px;height:16px;background:#00ff00;border:1px solid #000;margin-right:6px;"></span>Slime Chunk</div>
-  <div><span style="display:inline-block;width:16px;height:16px;background:#888;border:1px solid #000;margin-right:6px;"></span>Cave Area</div>
-  <div>🏠 Village</div>
-  <div>⛩️ Temple</div>
-  <div>⚔️ Stronghold</div>
-  <div style="color:#ff0000;">● Player</div>
-</div>
+  <!-- Tooltip element -->
+  <div id="tooltip"></div>
 
 <script>
 const canvas = document.getElementById('map');
@@ -73,10 +75,16 @@ function shadeColor(rgb,elev,enabled){
 
 // Features
 function isSlimeChunk(seed,x,z){
-  let cx=Math.floor(x/16), cz=Math.floor(z/16);
-  let rnd=BigInt(seed)+BigInt(cx*cx*0x4c1906)+BigInt(cx*0x5ac0db)+BigInt(cz*cz*0x4307a7)+BigInt(cz*0x5f24fe)^0x3ad8025f;
-  rnd=Number(rnd&0xffffffffn); if(rnd>0x7fffffff) rnd-=0x100000000;
-  return rnd%10===0;
+  const cx=Math.floor(x/16), cz=Math.floor(z/16);
+  let rnd = BigInt(seed) +
+            BigInt(cx)*BigInt(cx)*0x4c1906n +
+            BigInt(cx)*0x5ac0dbn +
+            BigInt(cz)*BigInt(cz)*0x4307a7n +
+            BigInt(cz)*0x5f24fen ^ 0x3ad8025fn;
+  rnd = rnd & 0xffffffffn;
+  let n = Number(rnd);
+  if (n > 0x7fffffff) n -= 0x100000000;
+  return (n % 10) === 0;
 }
 function isVillage(x,z){ return (x%512===0 && z%512===0); }
 function isTemple(x,z){ return (x%480===0 && z%480===0); }
@@ -125,43 +133,66 @@ function drawMap(){
   ctx.drawImage(tmp,0,0,size,size,(canvas.width-drawSize)/2,(canvas.height-drawSize)/2,drawSize,drawSize);
 
   // Structures overlay
-  if(showStructures){
-    ctx.font=`${12*zoom}px sans-serif`;
-    ctx.fillStyle="#000";
-    for(let z=0;z<size;z+=16){
-      for(let x=0;x<size;x+=16){
-        const bx=px-range+x+offsetX, bz=pz-range+z+offsetZ;
-        const sx=(canvas.width-drawSize)/2+x*zoom;
-        const sz=(canvas.height-drawSize)/2+z*zoom;
-        if(isVillage(bx,bz)) ctx.fillText("🏠",sx,sz);
-        if(isTemple(bx,bz)) ctx.fillText("⛩️",sx,sz);
-        if(isStronghold(bx,bz)) ctx.fillText("⚔️",sx,sz);
+  if (showStructures) {
+    const drawSize = canvas.width * zoom;
+    const startX = (canvas.width - drawSize) / 2;
+    const startZ = (canvas.height - drawSize) / 2;
+
+    // Visible world bounds (in blocks)
+    const worldMinX = px - range + offsetX;
+    const worldMinZ = pz - range + offsetZ;
+    const worldMaxX = px + range + offsetX;
+    const worldMaxZ = pz + range + offsetZ;
+
+    // Chunk-aligned sampling to check for structures
+    ctx.textBaseline = "top";
+    ctx.font = `${Math.max(12, 10 * zoom)}px sans-serif`;
+    ctx.fillStyle = "#000";
+
+    for (let bz = worldMinZ; bz <= worldMaxZ; bz += 16) {
+      for (let bx = worldMinX; bx <= worldMaxX; bx += 16) {
+        // Convert world block to screen position inside the zoomed/centered image
+        const localX = bx - worldMinX; // 0..size-1
+        const localZ = bz - worldMinZ; // 0..size-1
+        const sx = startX + localX * zoom;
+        const sz = startZ + localZ * zoom;
+
+        // Skip if outside the drawn image
+        if (sx < startX || sz < startZ || sx > startX + drawSize || sz > startZ + drawSize) continue;
+
+        // Draw icons
+        if (isVillage(bx, bz)) ctx.fillText("🏠", sx, sz);
+        if (isTemple(bx, bz))  ctx.fillText("⛩️", sx, sz);
+        if (isStronghold(bx, bz)) ctx.fillText("⚔️", sx, sz);
       }
     }
   }
-
-  // Grid overlay
-  if(showGrid){
-    ctx.strokeStyle="rgba(0,0,0,0.2)";
-    const step=16*zoom;
-    for(let gx=(canvas.width-drawSize)/2; gx<canvas.width-(canvas.width-drawSize)/2; gx+=step){
-      ctx.beginPath(); ctx.moveTo(gx,(canvas.height-drawSize)/2); ctx.lineTo(gx,canvas.height-(canvas.height-drawSize)/2); ctx.stroke();
+  // --- Grid overlay ---
+  if (showGrid) {
+    ctx.strokeStyle = "rgba(0,0,0,0.2)";
+    const step = 16 * zoom;
+    for (let gx = (canvas.width - drawSize) / 2; gx < canvas.width - (canvas.width - drawSize) / 2; gx += step) {
+      ctx.beginPath();
+      ctx.moveTo(gx, (canvas.height - drawSize) / 2);
+      ctx.lineTo(gx, canvas.height - (canvas.height - drawSize) / 2);
+      ctx.stroke();
     }
-    for(let gz=(canvas.height-drawSize)/2; gz<canvas.height-(canvas.height-drawSize)/2; gz+=step){
-      ctx.beginPath(); ctx.moveTo((canvas.width-drawSize)/2,gz); ctx.lineTo(canvas.width-(canvas.width-drawSize)/2,gz); ctx.stroke();
+    for (let gz = (canvas.height - drawSize) / 2; gz < canvas.height - (canvas.height - drawSize) / 2; gz += step) {
+      ctx.beginPath();
+      ctx.moveTo((canvas.width - drawSize) / 2, gz);
+      ctx.lineTo(canvas.width - (canvas.width - drawSize) / 2, gz);
+      ctx.stroke();
     }
   }
 
-  // Player marker
-  ctx.fillStyle="#ff0000";
+  // --- Player marker ---
+  ctx.fillStyle = "#ff0000";
   ctx.beginPath();
-  ctx.arc(canvas.width/2,canvas.height/2,5,0,Math.PI*2);
+  ctx.arc(canvas.width / 2, canvas.height / 2, 5, 0, Math.PI * 2);
   ctx.fill();
 }
 
-// Zoom
-canvas.addEvent
-  // --- Zoom handling ---
+// --- Zoom handling ---
 canvas.addEventListener("wheel", e => {
   e.preventDefault();
   const prevZoom = zoom;
